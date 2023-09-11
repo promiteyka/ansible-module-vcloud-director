@@ -1,5 +1,5 @@
 ---
-namespace: vmware
+namespace: cloud
 name: vcloud
 description: Ansible collection to manage Vcloud Director
 version: 1.0.0
