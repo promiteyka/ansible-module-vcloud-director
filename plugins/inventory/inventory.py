@@ -1,5 +1,29 @@
-#!/usr/bin/env python3
+# GNU General Public License v3.0+ (see COPYING or https://www.gnu.org/licenses/gpl-3.0.txt)
 
+from __future__ import (absolute_import, division, print_function)
+
+__metaclass__ = type
+
+DOCUMENTATION = '''
+---
+name: vmware vcloud
+plugin_type: inventory
+short_description: vmware vcloud inventory source
+requirements:
+    - pyvcloud
+
+extends_documentation_fragment:
+    - inventory_cache
+    - constructed
+
+description:
+    - Get inventory hosts from vmware vcloud
+'''
+
+from ansible.errors import AnsibleError
+from ansible.plugins.inventory import BaseInventoryPlugin, Constructable, Cacheable
+from ansible.utils.display import Display
+from ansible.module_utils._text import to_native
 import json
 import requests
 import os
@@ -7,40 +31,14 @@ import argparse
 import xml.etree.cElementTree as ET
 from time import time
 
-GLOBALS = {
-    'ansible_become': 'true',
-    'ansible_python_interpreter': '/usr/bin/python3',
-    'ansible_ssh_common_args': '-o StrictHostKeyChecking=no -o ProxyCommand="ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -W %h:%p $ANSIBLE_REMOTE_USER@public-jumphost-ip"'
-}
 
-OVERRIDE = {
-    'jumphost': {
-        'ansible_host': 'public-jumphost-ip',
-        'ansible_ssh_common_args': '-o StrictHostKeyChecking=no'
-    },
-    'server-01': {
-        'ansible_host': '10.10.0.21'
-    },
-    'server-02': {
-        'ansible_host': '10.10.0.22'
-    }
-}
+display = Display()
 
-class VcdInventory(object):
-    def _empty_inventory(self):
-        return {
-            'server': {
-                'children': [],
-                'hosts': []
-            },
-            '_meta': {
-                'hostvars': {}
-            }
-        }
 
-    def __init__(self):
-        self.inventory = self._empty_inventory()
+class InventoryModule(BaseInventoryPlugin, Constructable, Cacheable):
+    NAME = 'vmwarevcloud'
 
+    def _init_client(self):
         self.credentials = {
             'base_url': '',
             'username': '',
@@ -51,57 +49,13 @@ class VcdInventory(object):
             },
         }
 
-        self.parse_cli_args()
-        self.read_credentials()
-        self.configure_cache()
-
-        if self.args.refresh_cache:
-            self.call_update_cache()
-        elif not self.is_cache_valid():
-            self.call_update_cache()
-
-        if self.args.host:
-            data_to_print = self.host_information()
-        elif self.args.list:
-            if self.inventory == self._empty_inventory():
-                data_to_print = self.inventory_from_cache()
-            else:
-                data_to_print = self.json_format_dict(self.inventory, True)
-
-        print(data_to_print)
-
-    def parse_cli_args(self):
-        parser = argparse.ArgumentParser(description='Produce an Ansible Inventory file based on vCD')
-
-        parser.add_argument(
-            '--list',
-            action='store_true',
-            default=True,
-            help='List instances, used as default action as well'
-        )
-
-        parser.add_argument(
-            '--host',
-            action='store',
-            default=False,
-            help='Get all the variables about a specific instance'
-        )
-
-        parser.add_argument(
-            '--refresh-cache',
-            action='store_true',
-            default=False,
-            help='Force refresh of cache by making API requests'
-        )
-
-        self.args = parser.parse_args()
-
     def read_credentials(self):
         self.credentials['base_url'] = os.environ.get('VCD_URL', '')
 
         if not self.credentials['base_url'].strip():
             print('Missing VCD_URL environment variable!')
             exit(1)
+
 
         self.credentials['username'] = os.environ.get('VCD_USER', '')
 
@@ -121,33 +75,18 @@ class VcdInventory(object):
             print('Missing VCD_ORG environment variable!')
             exit(1)
 
-    def configure_cache(self):
-        cache_dir = os.path.expanduser('~/.vcd/cache')
+    def authenticate_to_api(self):
+        url = self.credentials['base_url'] + '/api/sessions'
 
-        if not os.path.exists(cache_dir):
-            os.makedirs(cache_dir)
-
-        cache_name = self.credentials.get('org')
-        cache_name += '-' + self.credentials.get('username')
-
-        self.cache_path_file = os.path.join(cache_dir, '%s.cache' % cache_name)
-        self.cache_max_age = 900
-
-    def is_cache_valid(self):
-        if os.path.isfile(self.cache_path_file):
-            mod_time = os.path.getmtime(self.cache_path_file)
-            current_time = time()
-
-            return (mod_time + self.cache_max_age) > current_time
-
-        return False
-
-    def write_to_cache(self, data, filename):
-        with open(filename, 'w') as f:
-            f.write(self.json_format_dict(data, True))
+        session = requests.post(
+            url,
+            headers=self.credentials['headers'],
+            auth=(self.credentials['username'] + '@' + self.credentials['org'], self.credentials['password'])
+        )
+        self.credentials['headers']['x-vcloud-authorization'] = session.headers['x-vcloud-authorization']
 
     def gather_vapp_list(self):
-        url = self.credentials['base_url'] + '/vApps/query'
+        url = self.credentials['base_url'] + '/api/vApps/query'
 
         return self.extract_from_tree(
             url
@@ -181,14 +120,15 @@ class VcdInventory(object):
         return groups
 
     def extract_from_tree(self, url):
-        return ET.fromstring(
+        response = ET.fromstring(
             requests.get(
                 url,
                 headers=self.credentials['headers']
             ).content
         )
+        return response
 
-    def merge_available_attrs(self, host):
+    def get_ip_address(self, host):
         result = {
             'ansible_host': self.search_within_attrs(
                 host,
@@ -197,12 +137,6 @@ class VcdInventory(object):
                 ''
             )
         }
-
-        result.update(GLOBALS)
-
-        if host.get('name') in OVERRIDE.keys():
-            result.update(OVERRIDE[host.get('name')])
-
         return result
 
     def search_within_attrs(self, root, tag, text, attr):
@@ -212,66 +146,34 @@ class VcdInventory(object):
             else:
                 return elem.get(attr)
 
-    def call_update_cache(self):
-        self.authenticate_to_api()
-
+    def _process_hosts(self):
         for vapp in self.gather_vapp_list():
             vapp_name = vapp.get('name')
-            self.inventory['server']['children'].append(vapp_name)
-
-            if not vapp_name in self.inventory.keys():
-                self.inventory[vapp_name] = {
-                    'hosts': []
-                }
 
             for host in self.gather_hosts_from(vapp.get('href')):
                 host_name = host.get('name')
+                inventory_hostname = f"{host_name}.{vapp_name}".format(host_name=host_name, vapp_name=vapp_name)
+                # get only hosts with ansible_host key
+                ip_address = self.get_ip_address(host=host)
+                if ip_address['ansible_host']:
+                    self.inventory.add_host(inventory_hostname)
+                    self.inventory.set_variable(inventory_hostname, 'ansible_host', ip_address)
+                else:
+                    break
 
-                for metadata in self.gather_meta_from(host.get('href')):
-                    if not metadata in self.inventory.keys():
-                        self.inventory[metadata] = {
-                            'hosts': []
-                        }
 
-                    self.inventory[metadata]['hosts'].append(host.get('name'))
+                # for metadata in self.gather_meta_from(host.get('href')):
+                #     self.inventory[metadata]['hosts'].append(host.get('name'))
+                #
+                #     self.inventory['server']['hosts'].append(host.get('name'))
+                #     self.inventory[vapp_name]['hosts'].append(host.get('name'))
+                #     self.inventory['_meta']['hostvars'][host_name] = self.merge_available_attrs(host)
 
-                self.inventory['server']['hosts'].append(host.get('name'))
-                self.inventory[vapp_name]['hosts'].append(host.get('name'))
-                self.inventory['_meta']['hostvars'][host_name] = self.merge_available_attrs(host)
 
-        self.write_to_cache(self.inventory, self.cache_path_file)
+    def parse(self, inventory, loader, path, cache=False):
+        super(InventoryModule, self).parse(inventory, loader, path)
+        self._init_client()
+        self.read_credentials()
+        self.authenticate_to_api()
+        self._process_hosts()
 
-    def authenticate_to_api(self):
-        url = self.credentials['base_url'] + '/sessions'
-
-        session = requests.post(
-            url,
-            headers=self.credentials['headers'],
-            auth=(self.credentials['username'] + '@' + self.credentials['org'], self.credentials['password'])
-        )
-
-        self.credentials['headers']['x-vcloud-authorization'] = session.headers['x-vcloud-authorization']
-
-    def inventory_from_cache(self):
-        with open(self.cache_path_file, 'r') as f:
-            return f.read()
-
-    def json_format_dict(self, data, pretty=False):
-        if pretty:
-            return json.dumps(data, sort_keys=True, indent=2)
-        else:
-            return json.dumps(data)
-
-    def host_information(self):
-        self.inventory = json.loads(self.inventory_from_cache())
-
-        if self.args.host not in self.inventory['_meta']['hostvars'].keys():
-            self.call_update_cache()
-
-        if self.args.host not in self.inventory['_meta']['hostvars'].keys():
-            return self.json_format_dict({}, True)
-
-        return self.json_format_dict(self.inventory['_meta']['hostvars'][self.args.host], True)
-
-if __name__ == '__main__':
-    VcdInventory()
