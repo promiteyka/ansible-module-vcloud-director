@@ -157,7 +157,7 @@ class InventoryModule(BaseInventoryPlugin, Constructable, Cacheable):
                 ip_address = self.get_ip_address(host=host)
                 if ip_address['ansible_host']:
                     self.inventory.add_host(inventory_hostname)
-                    self.inventory.set_variable(inventory_hostname, 'ansible_host', ip_address)
+                    self.inventory.set_variable(inventory_hostname, 'ansible_host', ip_address['ansible_host'])
                 else:
                     break
 
