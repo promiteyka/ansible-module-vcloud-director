@@ -1,0 +1,21 @@
+---
+namespace: vmware
+name: vcloud
+description: Ansible collection to manage Vcloud Director
+version: 1.0.0
+readme: README.md
+authors:
+  - ITCA Team
+tags:
+  - vmware
+  - vcloud
+repository: https://github.com/promiteyka/ansible-module-vcloud-director.git
+homepage: https://github.com/promiteyka/ansible-module-vcloud-director.git
+issues: https://jora.openintegration.inc
+
+build_ignore:
+  - '.teamcity'
+  - '*.tar.gz'
+  - '*.pyc'
+  - '*.spec'
+  - 'venv'
