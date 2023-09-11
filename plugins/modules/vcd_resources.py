@@ -76,7 +76,7 @@ msg: success/failure message corresponding to resource state
 changed: true if resource has been changed
 '''
 
-from ansible.module_utils.vcd import VcdAnsibleModule
+from ansible_collections.vmware.vcloud.plugins.module_utils.vcd import VcdAnsibleModule
 from pyvcloud.vcd.nsxt_extension import NsxtExtension
 from pyvcloud.vcd.exceptions import EntityNotFoundException
 

@@ -138,7 +138,7 @@ from pyvcloud.vcd.vapp import VApp
 from collections import defaultdict
 from pyvcloud.vcd.client import NSMAP
 from pyvcloud.vcd.client import EntityType
-from ansible.module_utils.vcd import VcdAnsibleModule
+from ansible_collections.vmware.vcloud.plugins.module_utils.vcd import VcdAnsibleModule
 from pyvcloud.vcd.exceptions import EntityNotFoundException
 from pyvcloud.vcd.exceptions import OperationNotSupportedException
 

@@ -104,7 +104,7 @@ from pyvcloud.vcd.client import E
 from pyvcloud.vcd.system import System
 from pyvcloud.vcd.client import EntityType
 from pyvcloud.vcd.client import RelationType
-from ansible.module_utils.vcd import VcdAnsibleModule
+from ansible_collections.vmware.vcloud.plugins.module_utils.vcd import VcdAnsibleModule
 from pyvcloud.vcd.exceptions import EntityNotFoundException
 
 
