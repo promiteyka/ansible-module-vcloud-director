@@ -6,37 +6,53 @@ __metaclass__ = type
 
 DOCUMENTATION = '''
 ---
-name: vmware vcloud
+name: vmwarevcloud
 plugin_type: inventory
-short_description: vmware vcloud inventory source
-requirements:
-    - pyvcloud
+short_description: vmware.Cloud inventory source
 
 extends_documentation_fragment:
     - inventory_cache
     - constructed
 
 description:
-    - Get inventory hosts from vmware vcloud
+    - Get inventory hosts from Vmware Vcloud
+
+options:
+    plugin:
+        description: Token that ensures this is a source file for the plugin.
+        required: True
+        choices: ['vmware.vcloud.inventory']
+    filters:
+        description: dictionary of filters
+        type: dict
 '''
 
-from ansible.errors import AnsibleError
+EXAMPLES = '''
+---
+plugin: vmware.vcloud.inventory
+
+keyed_groups:
+  - key: labels.role
+    separator: ''
+  # Just for example
+  - key: labels.project
+    separator: ''
+  - key: folderId
+    separator: ''
+    
+filters:
+  status: 'RUNNING'
+  labels:
+    "customer": "lekton"
+'''
+
 from ansible.plugins.inventory import BaseInventoryPlugin, Constructable, Cacheable
-from ansible.utils.display import Display
-from ansible.module_utils._text import to_native
-import json
 import requests
 import os
-import argparse
 import xml.etree.cElementTree as ET
-from time import time
-
-
-display = Display()
-
 
 class InventoryModule(BaseInventoryPlugin, Constructable, Cacheable):
-    NAME = 'vmwarevcloud'
+    NAME = 'vmware.vcloud.inventory'
 
     def _init_client(self):
         self.credentials = {
@@ -55,7 +71,6 @@ class InventoryModule(BaseInventoryPlugin, Constructable, Cacheable):
         if not self.credentials['base_url'].strip():
             print('Missing VCD_URL environment variable!')
             exit(1)
-
 
         self.credentials['username'] = os.environ.get('VCD_USER', '')
 
@@ -102,9 +117,9 @@ class InventoryModule(BaseInventoryPlugin, Constructable, Cacheable):
         )
 
     def gather_meta_from(self, href):
-        vals = self.extract_from_tree(
-            href + '/metadata'
-        ).iter(
+        url = href + '/metadata'
+        r = requests.get(url, headers=self.credentials['headers'])
+        vals = self.extract_from_tree(url=url).iter(
             '{http://www.vmware.com/vcloud/v1.5}MetadataEntry'
         )
 
@@ -113,10 +128,9 @@ class InventoryModule(BaseInventoryPlugin, Constructable, Cacheable):
         for val in vals:
             key = val.find('{http://www.vmware.com/vcloud/v1.5}Key').text
 
-            if key == 'ansible_groups':
+            if key == 'groups':
                 for value in val.iter('{http://www.vmware.com/vcloud/v1.5}Value'):
-                    groups.extend(value.text.split(','))
-
+                    groups = value.text.replace('\'', '').replace('"', '').strip('[]').split(', ')
         return groups
 
     def extract_from_tree(self, url):
@@ -151,29 +165,34 @@ class InventoryModule(BaseInventoryPlugin, Constructable, Cacheable):
             vapp_name = vapp.get('name')
 
             for host in self.gather_hosts_from(vapp.get('href')):
+
+                hostvar = {}
+
                 host_name = host.get('name')
                 inventory_hostname = f"{host_name}.{vapp_name}".format(host_name=host_name, vapp_name=vapp_name)
-                # get only hosts with ansible_host key
+
                 ip_address = self.get_ip_address(host=host)
+                # get only hosts with ansible_host key
                 if ip_address['ansible_host']:
-                    self.inventory.add_host(inventory_hostname)
-                    self.inventory.set_variable(inventory_hostname, 'ansible_host', ip_address['ansible_host'])
+                    hostvar['ansible_host'] = ip_address['ansible_host']
                 else:
                     break
+                hostvar['tags'] = self.gather_meta_from(host.get('href'))
 
+                self.inventory.add_host(inventory_hostname)
 
-                # for metadata in self.gather_meta_from(host.get('href')):
-                #     self.inventory[metadata]['hosts'].append(host.get('name'))
-                #
-                #     self.inventory['server']['hosts'].append(host.get('name'))
-                #     self.inventory[vapp_name]['hosts'].append(host.get('name'))
-                #     self.inventory['_meta']['hostvars'][host_name] = self.merge_available_attrs(host)
+                for key in hostvar:
+                    self.inventory.set_variable(inventory_hostname, key, hostvar[key])
 
+                self._set_composite_vars(self.get_option('compose'), hostvar, inventory_hostname)
+                self._add_host_to_composed_groups(self.get_option('groups'), hostvar, inventory_hostname)
+                self._add_host_to_keyed_groups(self.get_option('keyed_groups'), hostvar, inventory_hostname)
 
     def parse(self, inventory, loader, path, cache=False):
         super(InventoryModule, self).parse(inventory, loader, path)
+        self._read_config_data(path)
+
         self._init_client()
         self.read_credentials()
         self.authenticate_to_api()
         self._process_hosts()
-
