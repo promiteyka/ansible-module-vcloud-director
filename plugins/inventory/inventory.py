@@ -61,7 +61,7 @@ class InventoryModule(BaseInventoryPlugin, Constructable, Cacheable):
             'password': '',
             'org': '',
             'headers': {
-                'Accept': 'application/*+xml;version=30.0'
+                'Accept': 'application/*+xml;version=37.0'
             },
         }
 
