@@ -461,10 +461,10 @@ class VappVM(VcdAnsibleModule):
 
     def update_vm_cpu(self):
         virtual_cpus = self.params.get('virtual_cpus')
-        cores_per_socket = self.params.get('cores_per_socket')
+        # cores_per_socket = self.params.get('cores_per_socket')
 
         vm = self.get_vm()
-        update_cpu_task = vm.modify_cpu(virtual_cpus, cores_per_socket)
+        update_cpu_task = vm.modify_cpu(virtual_cpus)
 
         return self.execute_task(update_cpu_task)
 
